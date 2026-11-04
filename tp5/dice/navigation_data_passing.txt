@@ -1,0 +1,175 @@
+======================================================
+  页面之间传递数据 — 完整说明（面试/考试用）
+======================================================
+
+------------------------------------------------------
+【核心问题】
+  页面跳转时，怎么把数据带过去？
+  比如：Die2 当前点数是 4，跳到 Die3，Die3 怎么知道是 4？
+------------------------------------------------------
+
+
+══════════════════════════════════════════════════════
+方法 1：Navigation 路由参数（URL 传参）
+══════════════════════════════════════════════════════
+
+// 原理：把数据"拼进地址"，就像网页 URL 一样
+// 比如跳到 die_3_screen/4，Die3 从地址里读出 4
+
+// ── 第一步：在 Screens.kt 定义带参数的路由 ─────────
+object Die3 : Screens("die_3_screen/{dieValue}") {
+    fun createRoute(value: Int) = "die_3_screen/$value"
+}
+// "die_3_screen/{dieValue}" 里的 {dieValue} 是占位符，跳转时替换成真实数字
+
+// ── 第二步：在 NavGraph.kt 注册，并读取参数 ─────────
+composable(
+    route = Screens.Die3.route,
+    arguments = listOf(navArgument("dieValue") { type = NavType.IntType })
+) { backStackEntry ->
+    val value = backStackEntry.arguments?.getInt("dieValue") ?: 3
+    // backStackEntry.arguments 就是从地址里取出来的参数包
+    // ?: 3 表示取不到时用默认值 3
+    DiceResult3(navController = navController, initialValue = value)
+}
+
+// ── 第三步：跳转时传入数据 ───────────────────────────
+// 在 Die2 页面的按钮里：
+Button(onClick = { navController.navigate(Screens.Die3.createRoute(dieValue)) }) {
+    Text("Go to Die 3 with current value")
+}
+// dieValue 是 Die2 页面当前的点数，跳转时拼进地址
+
+// ── 第四步：DiceResult3 接收参数 ────────────────────
+@Composable
+fun DiceResult3(navController: NavHostController, initialValue: Int = 3) {
+    var dieValue by remember { mutableStateOf(initialValue) }
+    // initialValue 来自 Die2 传过来的数字
+    // 之后 dieValue 是页面自己的状态，可以继续修改
+    ...
+}
+
+// 优点：简单直接，适合传少量基础类型（Int、String）
+// 缺点：只能传简单类型，不能传复杂对象；数据在地址里，不够灵活
+
+
+══════════════════════════════════════════════════════
+方法 2：ViewModel 共享状态（推荐，TP3 会用到）
+══════════════════════════════════════════════════════
+
+// 原理：创建一个"数据管理员"（ViewModel），所有页面都访问同一个
+// 页面 A 改了数据 → ViewModel 保存 → 页面 B 读取 → 拿到最新数据
+
+// ── 第一步：创建 ViewModel ───────────────────────────
+class DiceViewModel : ViewModel() {
+    // _dieValue 是内部可修改的，外部只能读 dieValue
+    private val _dieValue = mutableStateOf(1)
+    val dieValue: State<Int> = _dieValue
+
+    fun updateValue(newValue: Int) {
+        _dieValue.value = newValue
+    }
+}
+// ViewModel 不会因为页面重组/跳转而销毁，数据一直在
+
+// ── 第二步：在 NavGraph 里创建，传给所有页面 ─────────
+@Composable
+fun NavGraph() {
+    val navController = rememberNavController()
+    val viewModel: DiceViewModel = viewModel()  // 整个导航共享同一个
+
+    NavHost(navController, startDestination = Screens.Main.route) {
+        composable(Screens.Die2.route) {
+            DiceResult2(navController = navController, viewModel = viewModel)
+        }
+        composable(Screens.Die3.route) {
+            DiceResult3(navController = navController, viewModel = viewModel)
+        }
+    }
+}
+
+// ── 第三步：页面里使用 ViewModel ────────────────────
+@Composable
+fun DiceResult2(navController: NavHostController, viewModel: DiceViewModel) {
+    val dieValue by viewModel.dieValue  // 读取 ViewModel 里的数据
+    Button(onClick = { viewModel.updateValue(dieValue + 2) }) {
+        Text("+2")
+    }
+}
+
+@Composable
+fun DiceResult3(navController: NavHostController, viewModel: DiceViewModel) {
+    val dieValue by viewModel.dieValue  // 拿到 Die2 改过的数字
+    Text("Value from Die2: $dieValue")
+}
+
+// 优点：可以传复杂数据，所有页面共享，不受页面生命周期影响
+// 缺点：稍微复杂一点，需要引入 ViewModel 依赖
+
+
+══════════════════════════════════════════════════════
+方法 3：Back Stack 返回数据（从 Die3 返回时带数据给 Die2）
+══════════════════════════════════════════════════════
+
+// 原理：从 Die3 返回 Die2 时，把数据"存到返回栈"，Die2 读取
+// 适合场景：页面 B 做了选择 → 返回 → 页面 A 拿结果
+
+// ── Die3 返回时存数据 ────────────────────────────────
+Button(onClick = {
+    navController.previousBackStackEntry
+        ?.savedStateHandle
+        ?.set("selectedValue", dieValue)  // 存数据到上一页的"暂存区"
+    navController.navigateUp()           // 返回
+}) { Text("Confirm & Back") }
+
+// ── Die2 读取 Die3 存回来的数据 ─────────────────────
+@Composable
+fun DiceResult2(navController: NavHostController) {
+    val savedState = navController.currentBackStackEntry?.savedStateHandle
+    val returnedValue = savedState?.get<Int>("selectedValue")
+    // returnedValue 就是 Die3 页面存过来的数字
+
+    var dieValue by remember { mutableStateOf(returnedValue ?: 2) }
+    ...
+}
+
+// 优点：专门用于"子页面返回数据给父页面"的场景
+// 缺点：只适合返回时传数据，不适合正向跳转传数据
+
+
+══════════════════════════════════════════════════════
+总结对比（考试/被问到时说这个）
+══════════════════════════════════════════════════════
+
+场景                              推荐方法
+──────────────────────────────────────────────────────
+跳转时带简单数字/字符串           方法1：路由参数
+多个页面共享同一份数据            方法2：ViewModel
+页面B完成操作，返回结果给页面A    方法3：savedStateHandle
+从网络加载数据并在多屏显示        方法2：ViewModel（TP3就是这个）
+
+
+══════════════════════════════════════════════════════
+我们 TP2 里实际用了什么
+══════════════════════════════════════════════════════
+
+// Die6 用的就是方法1：
+// MainDiceScreen 投出 6 → 跳转到 die_6_screen/6
+// Die6 从路由里读出 firstRoll = 6
+
+// 代码在 Screens.kt：
+object Die6 : Screens("die_6_screen/{firstRoll}") {
+    fun createRoute(firstRoll: Int) = "die_6_screen/$firstRoll"
+}
+
+// 代码在 NavGraph.kt：
+composable(
+    route = Screens.Die6.route,
+    arguments = listOf(navArgument("firstRoll") { type = NavType.IntType })
+) { backStackEntry ->
+    val firstRoll = backStackEntry.arguments?.getInt("firstRoll") ?: 1
+    DiceResult6(navController = navController, firstRoll = firstRoll)
+}
+
+// 注意：DiceResult6 收到 firstRoll 后没有用它（用了自己随机生成的）
+// 如果要用传进来的，把 mutableStateOf((1..6).random()) 改成 mutableStateOf(firstRoll)
