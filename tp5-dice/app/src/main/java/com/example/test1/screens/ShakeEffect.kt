@@ -15,7 +15,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.sqrt
 
 // 加速度超过重力的多少倍算一次摇晃（手机静止时约等于 1）
-private const val SHAKE_THRESHOLD_G = 2f
+// 用 1.4 而不是更常见的 2：模拟器 Virtual sensors 里拖滑块最多只能到 1.48 左右
+private const val SHAKE_THRESHOLD_G = 1.4f
 
 // 两次摇晃之间的最短间隔，避免一次摇晃被算成好几次
 private const val SHAKE_COOLDOWN_MS = 700L
